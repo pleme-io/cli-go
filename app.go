@@ -17,6 +17,16 @@ import (
 // named. The router builds a fresh [flag.FlagSet] for each invocation, calls
 // Flags to register flags onto it, parses the remaining argv, runs any
 // registered validators, and finally calls Run with the parsed set.
+//
+// # Help is DERIVED, never hand-formatted (Law 4)
+//
+// The help *structure* — the command listing, the flag table, enum value sets,
+// defaults, env names — is computed mechanically from this typed data and the
+// registered [Flag] values; it is never assembled by hand. The only authored
+// content is *prose* ([Summary], [Command.Long], [Command.Examples]), which is
+// typed data on the Command, rendered (never formatted) — eventually through
+// borealis (deferred while borealis.Execute/Render is in-flight; the structural
+// derivation runs today on the stdlib renderer).
 type Command struct {
 	// Name is the token used to select this command on the command line. It
 	// must be non-empty and is matched case-sensitively.
@@ -24,7 +34,9 @@ type Command struct {
 	// Summary is the one-line description shown in the parent's usage listing.
 	Summary string
 	// Flags, if set, registers flags onto the per-invocation FlagSet. Register
-	// validators here too via [RegisterValidator].
+	// validators here too via [RegisterValidator], or — preferred — bind typed
+	// [Flag] handles via [Flag.Bind], which carries validation-as-data and
+	// auto-documents OneOf/enum, defaults, and env names.
 	Flags func(fs *flag.FlagSet)
 	// Run executes the command. args holds the positional (non-flag) arguments
 	// left after parsing; fs is the parsed, validated flag set. Run is called
@@ -35,6 +47,44 @@ type Command struct {
 	// if no child matches and Run is set, Run handles it, otherwise usage is
 	// printed.
 	Sub []Command
+
+	// Aliases are alternate selection tokens for this command, matched the same
+	// way as Name. They are listed in the command's usage so help stays the
+	// single source of truth (Law 4: derived, not authored).
+	Aliases []string
+	// Hidden, when true, omits this command from usage listings while leaving it
+	// fully dispatchable — the convention for internal/experimental commands.
+	Hidden bool
+	// Category groups this command under a heading in the parent's usage
+	// listing. Commands sharing a Category are listed together; the empty
+	// category sorts first under no heading.
+	Category string
+	// Deprecated, when non-empty, marks this command as deprecated and supplies
+	// the guidance shown in usage (e.g. "use `auth login` instead"). The command
+	// still runs; the notice is derived into help, never hand-formatted.
+	Deprecated string
+
+	// Long is authored multi-line prose describing the command in detail, shown
+	// in the command's own usage below the summary. It is typed data — rendered,
+	// never hand-formatted into the structural help.
+	Long string
+	// Examples are authored example invocations, shown verbatim in the command's
+	// usage. Typed data, rendered as a block; the structure around them (the
+	// "Examples:" heading, indentation) is derived.
+	Examples []string
+}
+
+// matches reports whether tok selects this command by its Name or any Alias.
+func (c Command) matches(tok string) bool {
+	if c.Name == tok {
+		return true
+	}
+	for _, a := range c.Aliases {
+		if a == tok {
+			return true
+		}
+	}
+	return false
 }
 
 // AppOption configures an [App] at construction time (the functional-options
@@ -127,10 +177,10 @@ func (a *App) Run(ctx context.Context, argv []string) error {
 	return a.dispatch(ctx, cmd, a.name+" "+cmd.Name, args[1:])
 }
 
-// lookup finds a top-level command by name (last registration wins).
+// lookup finds a top-level command by name or alias (last registration wins).
 func (a *App) lookup(name string) (Command, bool) {
 	for i := len(a.commands) - 1; i >= 0; i-- {
-		if a.commands[i].Name == name {
+		if a.commands[i].matches(name) {
 			return a.commands[i], true
 		}
 	}
@@ -191,10 +241,10 @@ func (a *App) dispatch(ctx context.Context, cmd Command, path string, args []str
 	return cmd.Run(ctx, fs.Args(), fs)
 }
 
-// findSub finds a child command by name (last wins).
+// findSub finds a child command by name or alias (last wins).
 func findSub(subs []Command, name string) (Command, bool) {
 	for i := len(subs) - 1; i >= 0; i-- {
-		if subs[i].Name == name {
+		if subs[i].matches(name) {
 			return subs[i], true
 		}
 	}
@@ -236,12 +286,22 @@ func (a *App) printCommandUsage(cmd Command, path string) {
 	a.writeCommandUsage(cmd, path, fs)
 }
 
-// writeCommandUsage renders the usage block for a command (summary, usage line,
-// subcommand table, and the FlagSet's own flag defaults).
+// writeCommandUsage renders the usage block for a command. Every section is
+// DERIVED from the typed Command data (Law 4): the summary/long/examples prose
+// is rendered, the deprecation notice and alias list are derived from the typed
+// fields, the subcommand table is derived from Sub (Hidden filtered, Category
+// grouped), and the flag table is derived from the FlagSet plus any registered
+// typed [Flag] handles (OneOf/default/env).
 func (a *App) writeCommandUsage(cmd Command, path string, fs *flag.FlagSet) {
 	var b strings.Builder
 	if cmd.Summary != "" {
 		fmt.Fprintf(&b, "%s\n\n", cmd.Summary)
+	}
+	if cmd.Deprecated != "" {
+		fmt.Fprintf(&b, "DEPRECATED: %s\n\n", cmd.Deprecated)
+	}
+	if cmd.Long != "" {
+		fmt.Fprintf(&b, "%s\n\n", strings.TrimRight(cmd.Long, "\n"))
 	}
 	usage := "Usage:\n  " + path
 	if len(cmd.Sub) > 0 {
@@ -251,6 +311,9 @@ func (a *App) writeCommandUsage(cmd Command, path string, fs *flag.FlagSet) {
 		usage += " [flags]"
 	}
 	fmt.Fprintf(&b, "%s\n", usage)
+	if len(cmd.Aliases) > 0 {
+		fmt.Fprintf(&b, "\nAliases:\n  %s\n", strings.Join(cmd.Aliases, ", "))
+	}
 	if len(cmd.Sub) > 0 {
 		fmt.Fprintf(&b, "\nSubcommands:\n")
 		writeCommandTable(&b, cmd.Sub)
@@ -258,7 +321,15 @@ func (a *App) writeCommandUsage(cmd Command, path string, fs *flag.FlagSet) {
 	fmt.Fprint(a.out, b.String())
 	if hasFlags(fs) {
 		fmt.Fprintf(a.out, "\nFlags:\n")
-		fs.PrintDefaults()
+		writeFlagTable(a.out, fs)
+	}
+	if len(cmd.Examples) > 0 {
+		var e strings.Builder
+		fmt.Fprintf(&e, "\nExamples:\n")
+		for _, ex := range cmd.Examples {
+			fmt.Fprintf(&e, "  %s\n", ex)
+		}
+		fmt.Fprint(a.out, e.String())
 	}
 }
 
@@ -269,22 +340,75 @@ func hasFlags(fs *flag.FlagSet) bool {
 	return n > 0
 }
 
-// writeCommandTable writes an aligned "  name  summary" table, name-sorted.
+// writeFlagTable renders the flag listing. The structure (names, types,
+// defaults) is DERIVED by the stdlib flag package's PrintDefaults; the typed
+// [Flag] handles fold their OneOf set and env name into each flag's usage
+// string at Bind time, so the enum/env documentation is derived from the typed
+// Flag data rather than hand-formatted (Law 4). The borealis-styled rendering
+// of this table is deferred to borealis.Execute (in-flight). fs is expected to
+// already have its output set to w by the caller (dispatch/printCommandUsage).
+func writeFlagTable(w io.Writer, fs *flag.FlagSet) {
+	fs.SetOutput(w)
+	fs.PrintDefaults()
+}
+
+// writeCommandTable writes an aligned "  name  summary" table, derived from the
+// typed Command data: Hidden commands are filtered out, the remainder is grouped
+// by Category (empty category first, under no heading), and within each group
+// commands are name-sorted. A deprecated command is flagged inline. The table is
+// computed mechanically — it is never hand-formatted (Law 4).
 func writeCommandTable(b *strings.Builder, cmds []Command) {
-	if len(cmds) == 0 {
+	visible := make([]Command, 0, len(cmds))
+	for _, c := range cmds {
+		if !c.Hidden {
+			visible = append(visible, c)
+		}
+	}
+	if len(visible) == 0 {
 		return
 	}
-	sorted := make([]Command, len(cmds))
-	copy(sorted, cmds)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 
+	// Stable category order: first appearance, with "" (uncategorized) first.
+	var catOrder []string
+	byCat := map[string][]Command{}
+	for _, c := range visible {
+		if _, seen := byCat[c.Category]; !seen {
+			catOrder = append(catOrder, c.Category)
+		}
+		byCat[c.Category] = append(byCat[c.Category], c)
+	}
+	sort.SliceStable(catOrder, func(i, j int) bool {
+		if catOrder[i] == "" {
+			return true
+		}
+		if catOrder[j] == "" {
+			return false
+		}
+		return catOrder[i] < catOrder[j]
+	})
+
+	// Width is computed over the whole visible set so columns align across
+	// categories.
 	width := 0
-	for _, c := range sorted {
+	for _, c := range visible {
 		if len(c.Name) > width {
 			width = len(c.Name)
 		}
 	}
-	for _, c := range sorted {
-		fmt.Fprintf(b, "  %-*s  %s\n", width, c.Name, c.Summary)
+
+	multiCat := len(catOrder) > 1 || (len(catOrder) == 1 && catOrder[0] != "")
+	for _, cat := range catOrder {
+		group := byCat[cat]
+		sort.Slice(group, func(i, j int) bool { return group[i].Name < group[j].Name })
+		if multiCat && cat != "" {
+			fmt.Fprintf(b, "\n %s:\n", cat)
+		}
+		for _, c := range group {
+			summary := c.Summary
+			if c.Deprecated != "" {
+				summary = strings.TrimSpace(summary + " (deprecated)")
+			}
+			fmt.Fprintf(b, "  %-*s  %s\n", width, c.Name, summary)
+		}
 	}
 }

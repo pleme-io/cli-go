@@ -31,6 +31,33 @@
 //
 // Subcommands may nest one level via [Command.Sub]; the router dispatches on the
 // first non-flag token and prints usage for an unknown command or --help/-h.
+//
+// # Borealis elevation (§2.2)
+//
+// This package is the fleet CLI *authoring* surface; under the Borealis Theory
+// it carries the typed grammar (single source of truth) while presentation is
+// owned by borealis. The elevated surface adds, additively over the original:
+//
+//   - Typed validation-as-data: [Flag] is a generic, self-describing flag whose
+//     name/default/env/OneOf/Validate travel together, so help STRUCTURE
+//     (types, enum sets, defaults, env names) is DERIVED from the typed data,
+//     never hand-formatted (Law 4). Read a parsed, validated, typed value with
+//     [Flag.Get].
+//   - The fleet-standard persistent flag set ([FleetFlags]): --auth (its value
+//     set auto-wired from [AuthResolver.Kinds]), --profile, --gateway-url,
+//     --output, --no-color (NO_COLOR), --verbose — defined once, inherited
+//     everywhere.
+//   - A raised [Command] type: Aliases, Hidden, Category, Deprecated (derived
+//     into help) plus authored prose (Long, Examples — typed data, rendered).
+//
+// The dep-bearing integrations live in leaf sub-packages so the core stays
+// zero-dependency (Law 6/8): cli-go/cfg wires the canonical shikumi loader to a
+// primitive's FromConfig (§3.5), and cli-go/exit maps the cli sentinels into
+// errors-go exit codes (errors-go is the sole exit owner, §3.5). The
+// borealis.Execute entrypoint and borealis-rendered styled help/errors are
+// DEFERRED while borealis.Execute/Render is in-flight — the root [Command]
+// defined here is what borealis.Execute will consume; this package does not (and
+// must not) redeclare Execute.
 package cli
 
 import "errors"
