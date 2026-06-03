@@ -136,6 +136,17 @@ func (a *App) Name() string { return a.name }
 // Version returns the configured version string (empty if unset).
 func (a *App) Version() string { return a.version }
 
+// Description returns the App's one-line description (empty if unset).
+func (a *App) Description() string { return a.description }
+
+// Commands returns the registered top-level commands in registration order.
+// The cobra-lowering leaf (cli-go/cobrax) reads them to build the cobra command
+// tree; the slice is the App's own backing store (do not mutate).
+func (a *App) Commands() []Command { return a.commands }
+
+// Output returns the App's usage/version output writer (defaults to os.Stderr).
+func (a *App) Output() io.Writer { return a.out }
+
 // Run parses argv and dispatches to the selected command. argv is the full
 // process argument vector including the program name at index 0 (pass
 // os.Args directly).
@@ -221,6 +232,20 @@ func (a *App) dispatch(ctx context.Context, cmd Command, path string, args []str
 		return fmt.Errorf("cli: command %q is not runnable", path)
 	}
 
+	return a.exec(ctx, cmd, path, args)
+}
+
+// exec is the per-command execution engine: it builds a fresh [flag.FlagSet],
+// runs the Flags callback to register flags + validators-as-data, parses args,
+// runs the validators, and calls Run with the parsed set. It is the single
+// source of truth for "parse + validate + run one command" and is shared by the
+// stdlib router ([App.dispatch]) and the cobra-lowering leaf (cli-go/cobrax) so
+// the typed-Flag validation path is identical no matter which parser front-ends
+// it (Law 1: one shape; no duplicated parse/validate logic).
+//
+// It is exported via [App.ExecCommand] for the cobrax leaf; the unexported
+// method keeps the router call site terse.
+func (a *App) exec(ctx context.Context, cmd Command, path string, args []string) error {
 	fs := flag.NewFlagSet(path, flag.ContinueOnError)
 	fs.SetOutput(a.out)
 	reg := newRegistry(fs)
@@ -239,6 +264,24 @@ func (a *App) dispatch(ctx context.Context, cmd Command, path string, args []str
 		return err
 	}
 	return cmd.Run(ctx, fs.Args(), fs)
+}
+
+// ExecCommand runs a single leaf [Command] against args (parse + validate +
+// Run), bypassing the stdlib router's argv-splitting. path is the human-readable
+// command path used in usage and parse errors (e.g. "clint auth login"). args
+// are the command's own arguments (flags + positionals), exactly as the stdlib
+// router would hand them after stripping the command tokens.
+//
+// It exists so the cobra-lowering leaf (cli-go/cobrax) can reuse the *same*
+// typed-Flag parse/validate/Run engine the stdlib router uses, instead of
+// re-implementing it (PRIME DIRECTIVE: duplication is a bug). The command must
+// be runnable (Run != nil); a group-only command returns a not-runnable error,
+// matching the router.
+func (a *App) ExecCommand(ctx context.Context, cmd Command, path string, args []string) error {
+	if cmd.Run == nil {
+		return fmt.Errorf("cli: command %q is not runnable", path)
+	}
+	return a.exec(ctx, cmd, path, args)
 }
 
 // findSub finds a child command by name or alias (last wins).
