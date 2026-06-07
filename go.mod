@@ -2,12 +2,9 @@ module github.com/pleme-io/cli-go
 
 go 1.25.0
 
-// TEMP local replaces for already-committed elevated siblings (removed at
-// publish). The cli-go CORE imports neither: shikumi-go is imported only by the
-// cli/cfg leaf (Law 8) and errors-go only by the cli/exit leaf.
 require (
-	github.com/pleme-io/errors-go v0.0.0
-	github.com/pleme-io/shikumi-go v0.0.0
+	github.com/pleme-io/errors-go v0.1.0
+	github.com/pleme-io/shikumi-go v0.2.1
 )
 
 require github.com/spf13/cobra v1.10.2
@@ -31,7 +28,3 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 )
-
-replace github.com/pleme-io/shikumi-go => ../shikumi-go
-
-replace github.com/pleme-io/errors-go => ../errors-go

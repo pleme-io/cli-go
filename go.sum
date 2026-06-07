@@ -33,6 +33,10 @@ github.com/mitchellh/reflectwalk v1.0.2 h1:G2LzWKi524PWgd3mLHV8Y5k7s6XUvT0Gef6zx
 github.com/mitchellh/reflectwalk v1.0.2/go.mod h1:mSTlrgnPZtwu0c4WaC2kGObEpuNDbx0jmZXqmk4esnw=
 github.com/pelletier/go-toml v1.9.5 h1:4yBQzkHv+7BHq2PQUZF3Mx0IYxG7LsP222s7Agd3ve8=
 github.com/pelletier/go-toml v1.9.5/go.mod h1:u1nR/EPcESfeI/szUZKdtJ0xRNbUoANCkoOuaOx1Y+c=
+github.com/pleme-io/errors-go v0.1.0 h1:XiVnpNP5of5ZE9G/6gbDTonOedAGUDez0DChhidZU34=
+github.com/pleme-io/errors-go v0.1.0/go.mod h1:WRQSlKPAXoHKJIFYfovorgPYcArbEXA3pYshGVgQvRg=
+github.com/pleme-io/shikumi-go v0.2.1 h1:u8AGnVzUufq96aE0+VrjzOotbZiQzZoM6cY4Nz48e6E=
+github.com/pleme-io/shikumi-go v0.2.1/go.mod h1:WOgpi+F0oCZBVhWdDJY+RyLM+7xRdi+F+9N+2uyhS5U=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
